@@ -14,6 +14,7 @@ import os
 import sys
 import types
 import warnings
+import weakref
 
 import pytest
 
@@ -68,6 +69,7 @@ class Board:
         self.takes_fir = takes_fir
         self.pyadi_attempts = 0
         self.opens = 0
+        self.contexts_open_at_pyadi = None   # inspection contexts alive when pyadi opened
         self.settings = {}
         phy = FakeDev(STOCK_PHY, [
             FakeChan("voltage0", output=False, attrs={"sampling_frequency": FakeAttr(3000000)}),
@@ -95,10 +97,26 @@ class Board:
                 return ch.attrs["voltage_filter_fir_en"].value == "1"
 
 
+class OpenCtx:
+    """What iio.Context(uri) hands out: the board's context, opened.
+
+    libiio frees a board when the last reference to its context goes — which is
+    what lets a USB board be opened again — so openness is tracked the same way
+    here: by reference, not by an explicit close.
+    """
+    alive = weakref.WeakSet()
+
+    def __init__(self, board):
+        self.attrs = board.ctx.attrs
+        self.devices = board.ctx.devices
+        OpenCtx.alive.add(self)
+
+
 class FakePluto:
     def __init__(self, uri=None):
         self.board = Board.current
         self.board.opens += 1
+        self.board.contexts_open_at_pyadi = len(OpenCtx.alive)
         self.ctx = self.board.ctx
         self.uri = uri
 
@@ -129,8 +147,8 @@ def board(monkeypatch):
     b = Board()
     Board.current = b
     monkeypatch.setitem(sys.modules, "adi", types.SimpleNamespace(Pluto=FakePluto))
-    monkeypatch.setitem(sys.modules, "iio",
-                        types.SimpleNamespace(Context=lambda uri: Board.current.ctx))
+    monkeypatch.setitem(sys.modules, "iio", types.SimpleNamespace(
+        Context=lambda uri: OpenCtx(Board.current), scan_contexts=lambda: {}))
     monkeypatch.setattr(backends.time, "sleep", lambda *_a, **_k: None)
     yield b
     Board.current = None
@@ -160,6 +178,43 @@ def test_identification_borrows_the_context_and_does_not_open_a_second_device(bo
     """Two live contexts on one device is the EBUSY that costs a USB re-plug."""
     _open(_sink())
     assert board.opens == 1
+
+
+def test_the_inspection_context_is_closed_before_pyadi_opens_its_own(board):
+    """Over USB a board takes ONE context at a time. The one opened to identify
+    the board was still alive when pyadi opened its own, which then failed with
+    a bare "No device found" — nothing could transmit over usb:. A network link
+    takes two, so it went unseen."""
+    _open(_sink())
+    assert board.contexts_open_at_pyadi == 0
+
+
+# --------------------------- a board that does not open ---------------------
+def _refuse(uri):
+    raise OSError(0, "No error")       # what Windows libiio says for every failure
+
+
+def test_a_board_that_does_not_answer_is_described_not_handed_to_pyadi(board, monkeypatch):
+    """pyadi would repeat the very same open, wait out the same timeout, and
+    report "No device found"."""
+    monkeypatch.setitem(sys.modules, "iio",
+                        types.SimpleNamespace(Context=_refuse, scan_contexts=lambda: {}))
+    with pytest.raises(RuntimeError) as exc:
+        _open(_sink())
+    assert board.opens == 0
+    assert "192.168.2.1" in str(exc.value) and "Errno 0" not in str(exc.value)
+
+
+def test_a_refusal_from_pyadi_is_described_too(board, monkeypatch):
+    """The board answered the inspection and then would not open for pyadi —
+    e.g. something else took it in between."""
+    class Refuses(FakePluto):
+        def __init__(self, uri=None):
+            raise Exception("No device found")
+    monkeypatch.setitem(sys.modules, "adi", types.SimpleNamespace(Pluto=Refuses))
+    with pytest.raises(RuntimeError) as exc:
+        _open(_sink())
+    assert "192.168.2.1" in str(exc.value) and "No device found" not in str(exc.value)
 
 
 # --------------------------- the mismatch notice ----------------------------

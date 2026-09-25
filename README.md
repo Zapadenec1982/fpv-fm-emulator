@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.5.2](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.2.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.5.3](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.3.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -77,6 +77,7 @@ fpv_emulator/
   config.py       loading/validation of YAML scenarios
   probe.py        detection of the Pluto chip and its tuning limits
   iio_layout.py   finds the IIO control/RX/TX devices by shape, not by name
+  iio_host.py     libiio on this computer; says in words why a board did not open
   firmware.py     firmware profiles (which ways of setting the rate may be tried)
   i18n.py         English/Ukrainian catalog
   cli.py          command-line interface
@@ -86,7 +87,7 @@ config/
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
 CHANGELOG.md      what changed in each version
-tests/            offline core tests (pytest, 181 of them)
+tests/            offline core tests (pytest, 209 of them)
 ```
 
 ---
@@ -99,6 +100,15 @@ tests/            offline core tests (pytest, 181 of them)
    installs everything needed (numpy, PySide6, pyadi-iio…).
 2. **`run_gui.bat`** — double-click to **start the GUI**. The main window opens
    (startup errors, if any, are shown in a dialog).
+
+> **To transmit through a Pluto, Windows needs two installers from Analog Devices,
+> once per computer** — `setup.bat` cannot provide them, and a reinstalled Windows
+> needs them again: the [Pluto USB drivers](https://github.com/analogdevicesinc/plutosdr-m2k-drivers-win/releases)
+> (`PlutoSDR-M2k-USB-Drivers.exe`) and **libiio 0.25** (the `…-setup.exe` on
+> [its release page](https://github.com/analogdevicesinc/libiio/releases/tag/v0.25)).
+> Take 0.25, not the newer 1.x: the Python side that `setup.bat` installs is written
+> for 0.x. «Probe Pluto» says which of the two is missing. If `ip:192.168.2.1` does
+> not answer while the board is plugged in, the URI `usb:` reaches it over USB.
 
 > Tip: right-click `run_gui.bat` → create a desktop shortcut / pin it to the taskbar —
 > and startup becomes a single click.
@@ -152,7 +162,8 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt -r requirements-hw.txt
 ```
-The native **libiio** must be present in the system (Linux: `apt install libiio0 libiio-utils`).
+The native **libiio** must be present in the system (Windows: libiio 0.25 from Analog
+Devices, see above; Linux: `apt install libiio0 libiio-utils`).
 
 ---
 
@@ -322,17 +333,20 @@ the changelog's newest entry disagree, so they cannot drift apart.
 ```bash
 python -m pytest tests/ -q
 ```
-181 offline tests, no hardware required. They cover: band/channel lookup (including
+209 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
 spacing, the aliasing warnings, scenario-engine runs against a recording sink
 (sweep, the RF-off pause, tune-before-start ordering, power ramp, live power),
 IIO-layout detection on boards that rename their devices, the sample-rate path under
-each firmware profile, that `--firmware` actually reaches every device open, and that
-the Ukrainian catalog covers every string the code and the shipped YAML display, and
-that the saved window state survives a restart (including the values that a naive
-restore gets wrong: a "false" checkbox, a band stored by position, a stale pattern).
+each firmware profile, that `--firmware` actually reaches every device open, that a
+board is never held by two contexts at once (a USB board takes one), that a missing
+libiio and a board that does not answer are reported in words rather than as ctypes
+and errno noise, that the Ukrainian catalog covers every string the code and the
+shipped YAML display, and that the saved window state survives a restart (including
+the values that a naive restore gets wrong: a "false" checkbox, a band stored by
+position, a stale pattern).
 
 ---
 

@@ -8,10 +8,12 @@ result.
 """
 from __future__ import annotations
 
+import gc
 import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import iio_host
 from .i18n import t
 
 
@@ -37,8 +39,21 @@ class ProbeResult:
     # ('stock'/'hacked'), a different axis that happens to share the vocabulary.
     firmware_text: Optional[str] = None
     firmware_key: Optional[str] = None         # "" when the version is unrecognised
+    # The board was never asked, because this computer cannot ask: the native
+    # libiio (or the iio module) is missing. Kept apart from error so that the
+    # summary does not say "not found" — which is the same cable hunt again.
+    host_error: Optional[str] = None
+    # The range check failed on a board that had answered. The summary of a
+    # connected board never showed error, so this failure used to vanish.
+    range_error: Optional[str] = None
 
     def summary(self) -> str:
+        if self.host_error:
+            return "\n".join([
+                t("Pluto was not checked: the problem is on this computer, "
+                  "not with the board."),
+                "  " + self.host_error,
+            ])
         if not self.connected:
             if self.ctx_ok:
                 # we did reach it — the failure is on our side of the wire
@@ -78,8 +93,13 @@ class ProbeResult:
                          answer=t("YES") if self.reaches_5g8
                          else t("NO (a mod / up-converter is required)"))
             )
+        if self.range_error:
+            lines.append("  " + t("TX range check failed: {err}", err=self.range_error))
         for m in self.messages:
             lines.append(f"  · {m}")
+        if self.range_error and self.traceback_text:
+            lines.append("  " + t("Details (send this when reporting the problem):"))
+            lines.extend("    " + ln for ln in self.traceback_text.strip().splitlines())
         return "\n".join(lines)
 
 
@@ -92,10 +112,21 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
 
     # 1) context via libiio (pylibiio)
     ctx = None
+    layout = None
     try:
-        import iio  # type: ignore
+        iio = iio_host.import_iio()
         res.lib_versions["libiio (host)"] = ".".join(str(x) for x in iio.version[:2])
-        ctx = iio.Context(uri)
+        try:
+            ctx = iio.Context(uri)
+        except Exception as exc:
+            # A board that does not answer is not a bug, and its traceback says
+            # nothing: on Windows it is "OSError: [Errno 0] No error" whatever
+            # the cause. Say it in words, with what is on the USB bus — and skip
+            # the range check, which would only wait out the same timeout again.
+            failure = iio_host.open_failure(uri, exc)
+            res.error = failure.reason
+            res.messages.extend(failure.hints)
+            return res
         res.ctx_ok = True
         res.connected = True
         for name in ("hw_model", "hw_serial", "fw_version", "uri"):
@@ -123,27 +154,37 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
         except Exception:
             pass
     except ImportError:
-        res.messages.append(
-            t("pylibiio (the iio module) is not installed — skipping the context read")
-        )
+        res.host_error = t("pylibiio (the iio module) is not installed. Install it "
+                           "with: pip install pyadi-iio pylibiio")
+        return res
+    except iio_host.HostLibraryError as exc:
+        res.host_error = str(exc)
+        return res
     except Exception as exc:
         res.error = f"{type(exc).__name__}: {exc}"
         res.traceback_text = traceback.format_exc()
 
+    # Close it before pyadi opens its own. Over USB a board takes ONE context at
+    # a time: with this one still alive, the range check below failed with "No
+    # device found" — and silently, since the board had answered.
+    ctx = None
+    gc.collect()
+
     # 2) functional TX limit check via pyadi
-    if do_range_test:
+    if do_range_test and res.ctx_ok:
+        sdr = None
         try:
             import adi  # type: ignore
             # Open it the way the transmitter would. A board whose IIO devices
             # are named differently must not fail here while `tx` works — a
             # diagnostic that stops predicting the thing it exists to predict is
-            # worse than no diagnostic. The context from step 1 is reused; a
-            # second one on the same device invites EBUSY.
+            # worse than no diagnostic. The layout read in step 1 is reused, so
+            # no second context is opened to find it again.
             pluto_cls = adi.Pluto
-            if ctx is not None:
+            if layout is not None:
                 try:
-                    from .iio_layout import detect_layout, pluto_class_for
-                    pluto_cls = pluto_class_for(detect_layout(ctx))
+                    from .iio_layout import pluto_class_for
+                    pluto_cls = pluto_class_for(layout)
                 except Exception:
                     pass
             sdr = pluto_cls(uri=uri)
@@ -161,16 +202,17 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
                 res.tx_lo_max_hz = max(reachable)
                 res.reaches_5g8 = any(f >= 5.7e9 for f in reachable)
                 res.inferred_preset = "hacked" if res.reaches_5g8 else "stock"
-            del sdr
         except ImportError:
             res.messages.append(
                 t("pyadi-iio is not installed — skipping the TX range check")
             )
         except Exception as exc:
-            if not res.error:
-                res.error = f"{type(exc).__name__}: {exc}"
-                res.traceback_text = traceback.format_exc()
+            res.range_error = f"{type(exc).__name__}: {exc}"
+            res.traceback_text = traceback.format_exc()
+        finally:
+            # Give the board back before returning, for the same reason: Start
+            # pressed right after a probe must not find it still held over USB.
+            sdr = None
+            gc.collect()
 
-    if not res.connected and not res.error:
-        res.error = t("IIO context was not created (device not connected?)")
     return res

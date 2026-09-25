@@ -15,6 +15,41 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.5.3 — 2026-09-25
+
+### Fixed
+- **Nothing could transmit over `usb:`.** Opening a board took two IIO contexts at
+  once — one to identify the board and read its layout, then pyadi's own — and over
+  USB a board takes ONE at a time. pyadi's open failed with a bare `No device found`
+  every time. A network link takes two, which is why it went unseen. The inspection
+  context is now closed before pyadi opens its own; the same fix is in `bench-tx`.
+- **The probe's range check vanished over USB, without a word.** Same cause, and the
+  summary of a board that had answered never showed an error, so `TX LO` and
+  `Direct 5.8 GHz` were simply missing. It now says `TX range check failed: …` with
+  the details.
+- **A missing libiio read as a missing board.** A freshly installed Windows without
+  libiio printed `Pluto not found (…): TypeError: LoadLibrary() argument 1 must be
+  str, not None` — which sends people to check a cable that is fine. pylibiio is
+  only a ctypes wrapper, and without the native library `import iio` raises that
+  TypeError rather than ImportError (on Linux and macOS an AttributeError). The
+  probe, Start and `bench-tx` now all say that libiio is not installed on this
+  computer, which version to install (the one pylibiio was written for — not 1.x,
+  which heads the release page) and where to get it. A libiio that is present but
+  unusable is named, with its path.
+- **A board that does not answer is described in words.** On Windows libiio reports
+  every failed open as `OSError: [Errno 0] No error`, and pyadi reduces them all to
+  `No device found`. The probe and Start now say `nothing answers at 192.168.2.1`,
+  look at what is on the USB bus, and say what to do: `Set the URI to usb:` when the
+  board is there (the address `usb:1.6.5` changes on every replug; `usb:` follows the
+  board), the Pluto USB network adapter in Device Manager when that is what failed
+  to start, the cable and the drivers when nothing is visible. Start no longer asks
+  a silent board twice — pyadi would repeat the same open after the same timeout.
+- Both READMEs say that transmitting on Windows needs two installers from Analog
+  Devices once per computer — the Pluto USB drivers and libiio 0.25 — which
+  `setup.bat` cannot provide, and which a reinstalled Windows needs again.
+
+---
+
 ## 0.5.2 — 2026-08-10
 
 ### Fixed

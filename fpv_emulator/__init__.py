@@ -9,7 +9,7 @@ over the air goes through the Pluto backend (pyadi-iio) or into a file.
 #: Single source of truth. Bump it together with the CHANGELOG entry — a test
 #: checks that the two agree. Read without importing by run_gui.py, which needs
 #: it precisely when this package is what failed to import.
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 from .bands import BandTable, load_band_table
 from .video import VideoStandard, PAL50, NTSC60, list_patterns, generate_composite

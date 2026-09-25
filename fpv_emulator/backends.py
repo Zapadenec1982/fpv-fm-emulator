@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from . import firmware as firmware_mod
+from . import iio_host
 from .i18n import t
 
 
@@ -290,7 +291,10 @@ class PlutoSink(BaseSink):
         if self._sdr is not None:
             return
         try:
-            import adi  # noqa: WPS433 (lazy import of the hardware dependency)
+            # A missing native libiio arrives from here as HostLibraryError — a
+            # RuntimeError that already says what to install — not as the ctypes
+            # TypeError pyadi's own import of iio would raise.
+            adi = iio_host.import_adi()
         except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError(
                 t("pyadi-iio is not installed. Install it with: "
@@ -303,6 +307,7 @@ class PlutoSink(BaseSink):
         # from inside pyadi as "argument of type 'NoneType' is not iterable".
         pluto_cls = adi.Pluto
         phy_name = "ad9361-phy"
+        refused: Optional[BaseException] = None     # why the board did not open
         try:
             import iio  # noqa: WPS433
             from .iio_layout import detect_layout, pluto_class_for
@@ -310,7 +315,11 @@ class PlutoSink(BaseSink):
             # device whose DMA is being torn down is how the buffer ends up
             # stale, so the identity read borrows the context rather than
             # making its own. It only labels things — see firmware.py.
-            ctx = iio.Context(self.cfg.uri)
+            try:
+                ctx = iio.Context(self.cfg.uri)
+            except Exception as exc:
+                refused = exc
+                raise
             self._firmware = firmware_mod.identify(ctx)
             layout = detect_layout(ctx)
             phy_name = layout.phy or phy_name
@@ -324,8 +333,26 @@ class PlutoSink(BaseSink):
             raise
         except Exception:
             pass          # cannot inspect: fall back to the stock class
+        finally:
+            # ...and it is closed before pyadi opens its own. Over USB a board
+            # takes ONE context at a time: while this one was alive, pyadi's
+            # open below failed with a bare "No device found", so nothing could
+            # transmit over usb: at all. A network link takes two, which is why
+            # it went unseen. gc.collect() for the reason _reopen() gives.
+            ctx = None
+            gc.collect()
 
-        sdr = pluto_cls(uri=self.cfg.uri)
+        # pyadi would make the very same call and fail the same way — after the
+        # same timeout, and as "No device found". An empty URI is the exception:
+        # pyadi then looks for the board itself, which iio.Context cannot.
+        if refused is not None and self.cfg.uri:
+            raise RuntimeError(
+                iio_host.open_failure(self.cfg.uri, refused).message()) from refused
+        try:
+            sdr = pluto_cls(uri=self.cfg.uri)
+        except Exception as exc:
+            raise RuntimeError(
+                iio_host.open_failure(self.cfg.uri, exc).message()) from exc
 
         def _set(attr: str, value, unit: str = ""):
             """Apply one setting, naming it if the device rejects it.

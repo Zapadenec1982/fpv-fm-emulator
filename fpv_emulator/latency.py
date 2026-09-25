@@ -27,6 +27,7 @@ All timestamps use ``time.perf_counter()`` (monotonic).
 from __future__ import annotations
 
 import csv
+import gc
 import os
 import random
 import re
@@ -39,6 +40,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 
 from . import firmware as firmware_mod
+from . import iio_host
 from .backends import apply_sample_rate
 from .i18n import t
 from .logsource import LogSource
@@ -145,7 +147,7 @@ def bench_command_to_rf(
     the constant RX pipeline delay, so treat the result as "our side of the chain,
     upper bound".
     """
-    import adi  # noqa: WPS433 — hardware dependency, imported lazily
+    adi = iio_host.import_adi()   # a missing libiio in words, not a ctypes TypeError
 
     # This benchmark needs RX as well as TX, so it cannot borrow PlutoSink. It
     # must still open the device the same way the sink does, or a board whose
@@ -161,8 +163,14 @@ def bench_command_to_rf(
         pluto_cls = pluto_class_for(layout)
     except Exception:
         pass          # cannot inspect: fall back to the stock class
+    # The inspection's context must be gone before pyadi opens its own — over USB
+    # a board takes one at a time (see PlutoSink._ensure_open).
+    gc.collect()
 
-    sdr = pluto_cls(uri=uri)
+    try:
+        sdr = pluto_cls(uri=uri)
+    except Exception as exc:
+        raise RuntimeError(iio_host.open_failure(uri, exc).message()) from exc
     note = apply_sample_rate(sdr, phy_name, fs, firmware)
     if note:
         warnings.warn(note, stacklevel=2)
