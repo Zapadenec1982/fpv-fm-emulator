@@ -13,3 +13,6 @@ config/scenarios/*_local.yaml
 # measurement output
 *.csv
 startup_error.log
+
+# native HackRF libraries, fetched by scripts/fetch_hackrf.py (not redistributed)
+third_party/hackrf/

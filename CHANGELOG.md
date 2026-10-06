@@ -15,6 +15,38 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.6.0 — 2026-10-06
+
+### Added
+- **HackRF One as its own backend, `hackrf`** — in the GUI's backend list, in
+  `tx --backend hackrf` and in `probe --device hackrf`. It talks to libhackrf
+  directly (ctypes), so it works without SoapySDR, which had no installer path on
+  Windows short of PothosSDR. The frame is looped on the host by libhackrf's
+  transfer callback; retuning, power and frame changes apply on air.
+- **Power keeps its meaning on a HackRF:** one slider dB is one dB from the maximum —
+  0..−47 dB on TXVGA, 0..−61 dB with the new **RF amplifier +14 dB** switch (GUI)
+  or `--amp` (CLI). The amplifier is switched on only when TXVGA alone is not
+  enough. (`soapy` still stretches −89..0 over the device's range.)
+- **A HackRF serial** field / `--serial`, for a bench with more than one board.
+- **The GUI offers only what the selected backend reads.** With `hackrf`: no Pluto
+  URI, no firmware profile, no AD9363/AD9361 range, the sample rate tops out at
+  20 MSPS and the power slider at -47 dB (-61 dB with the amplifier). With `pluto`:
+  no HackRF serial, amplifier or range, and the usual 61.44 MSPS / -89 dB. A field
+  the sink ignores, left editable, reads as a setting that applied.
+- **«Probe HackRF»** reads the board, firmware and serial, and selects the new
+  `hackrf` HW range (1 MHz – 6 GHz).
+- **`scripts/fetch_hackrf.py`** fetches libhackrf, libusb and libwinpthread for
+  Windows from conda-forge, checks each against a pinned sha256 and puts only the
+  DLLs into `third_party/hackrf` (gitignored — they are not redistributed here).
+
+### Notes
+- A sample rate outside 2–20 MSPS is refused at Start, not adjusted, for the same
+  reason as on the Pluto: the line timing is generated for the rate asked for.
+- A stream that libhackrf drops (USB error, unplug) is reported through the error
+  channel and stops the run, instead of leaving a silent board looking armed.
+- A process killed mid-transmission can leave a HackRF stuck in TX; it then answers
+  "not found" until RESET. The open error says so.
+
 ## 0.5.3 — 2026-09-25
 
 ### Fixed

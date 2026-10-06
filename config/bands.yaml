@@ -14,11 +14,13 @@
 #  hardware_ranges — reference tuning limits of the Pluto+ (used for warnings).
 #    stock  = AD9363 (325 MHz – 3.8 GHz)
 #    hacked = AD9361 mod   (70 MHz – 6.0 GHz) — reaches 5.8 GHz directly
+#    hackrf = HackRF One   (1 MHz – 6.0 GHz)
 # =============================================================================
 
 hardware_ranges:
   stock:  { min_mhz: 325.0, max_mhz: 3800.0, chip: "AD9363" }
   hacked: { min_mhz: 70.0,  max_mhz: 6000.0, chip: "AD9361" }
+  hackrf: { min_mhz: 1.0,   max_mhz: 6000.0, chip: "HackRF One" }
 
 bands:
 

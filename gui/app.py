@@ -136,6 +136,7 @@ def _as_bool(value) -> bool:
 #: reads it before this module is importable, to translate a startup failure.
 _STATE_TYPES = {
     "backend": str, "uri": str, "device": str, "file": str,
+    "serial": str, "amp": _as_bool,
     "band": str, "channel": str, "firmware": str, "hw": str,
     "standard": str, "pattern": str, "mode": str,
     "freq": float, "fs": float, "dev": float,
@@ -257,10 +258,20 @@ class MainWindow(QtWidgets.QMainWindow):
         gb_be = QtWidgets.QGroupBox(t("Output"))
         f = QtWidgets.QFormLayout(gb_be)
         self.cb_backend = QtWidgets.QComboBox()
-        self.cb_backend.addItems(["pluto", "soapy", "null", "file"])
+        self.cb_backend.addItems(["pluto", "hackrf", "soapy", "null", "file"])
         self.cb_backend.currentTextChanged.connect(self._on_backend_changed)
         self.ed_uri = QtWidgets.QLineEdit("ip:192.168.2.1")
         self.ed_device = QtWidgets.QLineEdit("driver=hackrf")   # SoapySDR args
+        self.ed_serial = QtWidgets.QLineEdit()                  # HackRF serial
+        self.ed_serial.setPlaceholderText(t("empty = the first HackRF found"))
+        self.chk_amp = QtWidgets.QCheckBox(t("RF amplifier +14 dB"))
+        self.chk_amp.setToolTip(
+            t("Lets the power slider reach 14 dB further: without it 0 dB is TXVGA "
+              "47 dB, with it 0 dB is TXVGA 47 dB + the amplifier. The amplifier is "
+              "switched on only when the slider asks for more than TXVGA alone gives. "
+              "Never run it without an antenna or a load on the output."))
+        # the amplifier moves the bottom of the power scale (-47 / -61 dB)
+        self.chk_amp.toggled.connect(lambda _on: self._sync_backend_controls())
         self.ed_file = QtWidgets.QLineEdit("out.iq")
         # Firmware profile: which ways of setting the sample rate the sink may
         # try. Deliberately NOT called stock/hacked — those two words already
@@ -286,6 +297,8 @@ class MainWindow(QtWidgets.QMainWindow):
         f.addRow(t("Backend:"), self.cb_backend)
         f.addRow(t("URI Pluto:"), self.ed_uri)
         f.addRow(t("Firmware:"), self.cb_fw)
+        f.addRow(t("HackRF serial:"), self.ed_serial)
+        f.addRow(t("HackRF:"), self.chk_amp)
         f.addRow(t("SDR (soapy):"), self.ed_device)
         f.addRow(t("File (file):"), self.ed_file)
         f.addRow(t("Language:"), self.cb_lang)
@@ -317,7 +330,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # no setValue() here: _refresh_channels() -> _on_channel_changed() owns this
         # field, and _build_ui() preselects the default channel (R1).
         self.cb_hw = QtWidgets.QComboBox()
-        self.cb_hw.addItems(["hacked", "stock"])
+        self.cb_hw.addItems(["hacked", "stock", "hackrf"])
         self.cb_hw.currentIndexChanged.connect(self._update_readouts)
         self.sp_freq.valueChanged.connect(self._update_readouts)
         f.addRow(t("Band:"), self.cb_band)
@@ -356,7 +369,7 @@ class MainWindow(QtWidgets.QMainWindow):
         col.addWidget(gb_sig)
 
         # power
-        gb_pw = QtWidgets.QGroupBox(t("Power (tx_hardwaregain)"))
+        self.gb_pw = gb_pw = QtWidgets.QGroupBox(t("Power (tx_hardwaregain)"))
         v = QtWidgets.QVBoxLayout(gb_pw)
         self.sl_gain = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.sl_gain.setRange(-89, 0)
@@ -429,6 +442,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "backend": self.cb_backend.currentText(),
             "uri": self.ed_uri.text(),
             "device": self.ed_device.text(),
+            "serial": self.ed_serial.text(),
+            "amp": self.chk_amp.isChecked(),
             "file": self.ed_file.text(),
             # keys, not indices: an index means a different band once bands.yaml
             # gains an entry, and this snapshot now outlives the session
@@ -503,6 +518,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cb_fw.blockSignals(False)
         self.ed_uri.setText(state.get("uri", ""))
         self.ed_device.setText(state.get("device", ""))
+        self.ed_serial.setText(state.get("serial", ""))
+        self.chk_amp.setChecked(bool(state.get("amp", False)))
         self.ed_file.setText(state.get("file", ""))
 
         # "" is the «— all —» row, whose userData is None
@@ -809,17 +826,79 @@ class MainWindow(QtWidgets.QMainWindow):
                        gain_db=float(self.sl_gain.value()),
                        uri=self.ed_uri.text(), rf_bw_hz=self._rf_bw_for(scenario, fs),
                        device=self.ed_device.text(),
+                       serial=self.ed_serial.text().strip(),
+                       amp=self.chk_amp.isChecked(),
                        firmware=str(self.cb_fw.currentData() or AUTO))
         return make_sink(kind, cfg, file_path=self.ed_file.text())
 
+    #: «HW range» presets that describe a Pluto, and the one that describes a HackRF
+    _PLUTO_HW = ("hacked", "stock")
+    _HACKRF_HW = "hackrf"
+
+    def _sync_backend_controls(self) -> None:
+        """Enable only the settings the selected backend actually reads.
+
+        A Pluto's URI, firmware profile, AD9363/AD9361 range, 61.44 MSPS ceiling
+        and -89 dB attenuation mean nothing to a HackRF, and its serial, amplifier,
+        range, 20 MSPS ceiling and 0..-47/-61 dB scale mean nothing to a Pluto.
+        Left editable, a field the sink ignores reads as a setting that applied.
+        Everything here is also frozen while on air: the device is opened with
+        these values at Start.
+        """
+        from fpv_emulator.hackrf import AMP_GAIN_DB, FS_MAX_HZ, TXVGA_MAX_DB
+
+        name = self.cb_backend.currentText()
+        idle = self.thread is None
+        pluto, hackrf, soapy = (name == "pluto"), (name == "hackrf"), (name == "soapy")
+
+        self.ed_uri.setEnabled(pluto and idle)
+        self.cb_fw.setEnabled(pluto and idle)
+        self.ed_serial.setEnabled(hackrf and idle)
+        self.chk_amp.setEnabled(hackrf and idle)
+        self.ed_device.setEnabled(soapy and idle)
+        self.btn_devices.setEnabled(soapy and idle)
+        self.btn_probe.setText(t("Probe HackRF") if hackrf else t("Probe Pluto"))
+
+        # HW range: a HackRF has exactly one, and the Pluto presets cannot be
+        # picked for it — nor its preset for anything else
+        model = self.cb_hw.model()
+        for i in range(self.cb_hw.count()):
+            is_hackrf_item = self.cb_hw.itemText(i) == self._HACKRF_HW
+            model.item(i).setEnabled(is_hackrf_item == hackrf)
+        if hackrf:
+            self.cb_hw.setCurrentText(self._HACKRF_HW)
+        elif self.cb_hw.currentText() == self._HACKRF_HW:
+            self.cb_hw.setCurrentText(self._PLUTO_HW[0])
+        self.cb_hw.setEnabled(not hackrf)
+
+        # sample rate ceiling; Qt clamps a value above it
+        fs_max = FS_MAX_HZ / 1e6 if hackrf else 61.44
+        if self.sp_fs.maximum() != fs_max:
+            if self.sp_fs.value() > fs_max:
+                self._log(t("[info] HackRF: sample rate lowered to {max} MSPS — its maximum.",
+                            max=f"{fs_max:.0f}"))
+            self.sp_fs.setMaximum(fs_max)
+
+        # power scale: what the device can actually do, 0 = maximum either way
+        if hackrf:
+            g_min = -(TXVGA_MAX_DB + (AMP_GAIN_DB if self.chk_amp.isChecked() else 0))
+            self.gb_pw.setTitle(t("Power (TXVGA + RF amplifier)") if self.chk_amp.isChecked()
+                                else t("Power (TXVGA)"))
+        else:
+            g_min = -89
+            self.gb_pw.setTitle(t("Power (tx_hardwaregain)"))
+        self.sl_gain.setMinimum(g_min)
+
     def _on_backend_changed(self, name: str):
         soapy = (name == "soapy")
-        running = self.thread is not None
-        self.ed_device.setEnabled(soapy and not running)
-        self.btn_devices.setEnabled(soapy and not running)
-        self.cb_fw.setEnabled(name == "pluto" and not running)
+        hackrf = (name == "hackrf")
+        self._sync_backend_controls()
         if name == "null":
             self._log(t("[WARN] backend = null — dry run, nothing goes on air."))
+        elif hackrf:
+            self._log(t("[info] backend = hackrf — 2–20 MSPS, power 0..-47 dB "
+                        "(0..-61 dB with the RF amplifier). «Probe HackRF» checks the "
+                        "board."))
         elif soapy:
             self._log(t("[info] backend = soapy — set the device in the «SDR (soapy)» field "
                         "(e.g. driver=hackrf|lime|uhd). «List SDRs» shows what is available."))
@@ -846,10 +925,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.status.showMessage(
                 t("Not available while transmitting — press Stop first."), 4000)
             return
-        from fpv_emulator.probe import probe
-        self.status.showMessage(t("Probing Pluto…"))
-        QtWidgets.QApplication.processEvents()
-        res = probe(uri=self.ed_uri.text())
+        if self.cb_backend.currentText() == "hackrf":
+            from fpv_emulator.hackrf import probe_hackrf
+            self.status.showMessage(t("Probing HackRF…"))
+            QtWidgets.QApplication.processEvents()
+            res = probe_hackrf(serial=self.ed_serial.text().strip() or None)
+        else:
+            from fpv_emulator.probe import probe
+            self.status.showMessage(t("Probing Pluto…"))
+            QtWidgets.QApplication.processEvents()
+            res = probe(uri=self.ed_uri.text())
         self._log(res.summary())
         if res.inferred_preset:
             self.cb_hw.setCurrentText(res.inferred_preset)
@@ -949,16 +1034,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         # frozen while on air: everything the running sink would NOT follow
-        for w in (self.cb_backend, self.ed_uri, self.cb_mode, self.cb_lang,
+        for w in (self.cb_backend, self.cb_mode, self.cb_lang,
                   self.btn_probe, self.sp_freq, self.cb_band, self.cb_channel):
             w.setEnabled(not running)
-        # pluto-only, and frozen on air: the sink is already open, so changing it
-        # mid-run would look like it applied and do nothing
-        self.cb_fw.setEnabled(self.cb_backend.currentText() == "pluto" and not running)
-        # these two are additionally soapy-only (see _on_backend_changed)
-        soapy = (self.cb_backend.currentText() == "soapy")
-        self.ed_device.setEnabled(soapy and not running)
-        self.btn_devices.setEnabled(soapy and not running)
+        # backend-specific fields: only the selected backend's, and none on air
+        self._sync_backend_controls()
         # in scenario mode the YAML file owns the whole Signal group
         manual_signal = (not running) and (not scenario_mode)
         for w in (self.cb_std, self.cb_pattern, self.sp_fs, self.sp_dev):

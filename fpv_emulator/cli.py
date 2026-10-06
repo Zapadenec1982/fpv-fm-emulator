@@ -79,6 +79,11 @@ def _fmt_event(e: dict) -> str:
 def cmd_probe(args) -> int:
     # printed with the result, so a pasted probe says which build produced it
     print(t("FPV FM emulator v{version}", version=__version__))
+    if args.device == "hackrf":
+        from .hackrf import probe_hackrf
+        res = probe_hackrf(serial=args.serial or None)
+        print(res.summary())
+        return 0 if res.connected else 2
     res = probe(uri=args.uri, do_range_test=not args.no_range_test)
     print(res.summary())
     return 0 if res.connected else 2
@@ -400,6 +405,7 @@ def _cmd_tx(args) -> int:
         offsets, fs)
     cfg = TxConfig(fs=fs, freq_hz=0.0, gain_db=sp.gain_db, uri=args.uri,
                    rf_bw_hz=rf_bw, device=args.device,
+                   serial=args.serial, amp=args.amp,
                    firmware=args.firmware)
     sink = make_sink(args.backend, cfg, file_path=args.out)
 
@@ -439,7 +445,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pp = sub.add_parser("probe", parents=[lang_parent],
                         help=t("Find Pluto and determine its frequency range"))
+    pp.add_argument("--device", default="pluto", choices=["pluto", "hackrf"],
+                    help=t("which board to probe (default: pluto)"))
     pp.add_argument("--uri", default="ip:192.168.2.1")
+    pp.add_argument("--serial", default="",
+                    help=t("HackRF serial (backend=hackrf); default: the first one found"))
     pp.add_argument("--no-range-test", action="store_true",
                     help=t("Do not retune TX during the probe"))
     pp.set_defaults(func=cmd_probe)
@@ -544,11 +554,16 @@ def build_parser() -> argparse.ArgumentParser:
     pg.set_defaults(func=cmd_gen)
 
     pt = sub.add_parser("tx", parents=[lang_parent, fw_parent],
-                        help=t("Transmit (Pluto/file/null) or run a scenario"))
-    pt.add_argument("--backend", default="null", choices=["pluto", "soapy", "file", "null"])
+                        help=t("Transmit (Pluto/HackRF/file/null) or run a scenario"))
+    pt.add_argument("--backend", default="null",
+                    choices=["pluto", "hackrf", "soapy", "file", "null"])
     pt.add_argument("--uri", default="ip:192.168.2.1", help=t("Pluto URI (backend=pluto)"))
     pt.add_argument("--device", default="driver=hackrf",
                     help=t("SoapySDR device args (backend=soapy): driver=hackrf|lime|uhd|bladerf"))
+    pt.add_argument("--serial", default="",
+                    help=t("HackRF serial (backend=hackrf); default: the first one found"))
+    pt.add_argument("--amp", action="store_true",
+                    help=t("HackRF: allow the +14 dB RF amplifier (power reaches 0..-61 dB)"))
     pt.add_argument("--channel", help=t("e.g. R1"))
     pt.add_argument("--freq-mhz", help=t("manual carrier, MHz"))
     pt.add_argument("--pattern", default="color_bars", choices=list_all_patterns())

@@ -18,7 +18,7 @@
 
 ## Завантаження (без git і терміналу)
 
-1. **[⬇ Завантажити ZIP — v0.5.3](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.3.zip)** — версія з
+1. **[⬇ Завантажити ZIP — v0.6.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.0.zip)** — версія з
    тегом, яку описує цей README, і саме її варто назвати, якщо щось піде не так.
    ([усі версії](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [рухома вершина `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    яка змінюється між релізами.)
@@ -72,7 +72,8 @@ fpv_emulator/
   video.py        композитне відео (PAL50/NTSC60), люма + кольорові патерни, хрома
   fm.py           ЧМ-модуляція baseband → IQ, конверсія в int16
   signal_gen.py   відео+ЧМ → кадровий (циклічний) IQ; мультидрон
-  backends.py     приймачі IQ: Pluto (pyadi-iio) | soapy (HackRF/Lime/…) | file | null
+  backends.py     приймачі IQ: Pluto (pyadi-iio) | hackrf | soapy (HackRF/Lime/…) | file | null
+  hackrf.py       HackRF One через libhackrf (ctypes) + його проба
   scenarios.py    рушій сценаріїв (static/sweep+pause/power_ramp/multi_drone), жива потужність
   config.py       завантаження/валідація YAML-сценаріїв
   probe.py        визначення чипа й меж перестроювання Pluto
@@ -117,7 +118,7 @@ tests/            офлайн-тести ядра (pytest, 209 шт.)
 
 Відкривається одразу з робочим профілем (color_bars, 20 MSPS, PAL50, backend
 `pluto`). Усе керується мишкою:
-- **Вихід:** backend (`pluto` / `soapy` для HackRF та ін.), URI/пристрій, профіль
+- **Вихід:** backend (`pluto` / `hackrf` / `soapy` для інших SDR), URI/пристрій, профіль
   **Прошивки** (див. нижче), кнопки «Проба Pluto» і «Список SDR».
 - **Частота:** банд/канал або несуча вручну.
 - **Сигнал:** стандарт, патерн (прев'ю в кольорі), частота дискретизації, девіація.
@@ -292,6 +293,7 @@ CLI: `--firmware auto|adi|tezuka`, для кожної команди, що ві
 | Backend | Пристрої | Примітки |
 |---------|----------|----------|
 | `pluto` | ADALM-Pluto / Pluto+ | нативно (pyadi-iio/libiio), циклічний буфер у пристрої |
+| `hackrf` | **HackRF One** | нативно (libhackrf, без SoapySDR); кадр крутить хост |
 | `soapy` | **HackRF, LimeSDR, BladeRF, USRP**, Pluto та ін. | через SoapySDR; хост безперервно ллє кадр |
 | `file` | будь-який (офлайн) | запис IQ у `.iq`/`.npy` |
 | `null` | — | сухий прогін без ефіру |
@@ -310,6 +312,29 @@ python -m fpv_emulator.cli tx --backend soapy --device driver=lime --scenario sw
 буфера (хост крутить кадр). Дешеві RTL-SDR-донгли **передавати не вміють** (тільки
 прийом). Діагностики через RX (проба, RX-самоприйом) — специфічні для Pluto.
 Встановлення SoapySDR — див. `requirements-hw.txt` (pip його не ставить).
+
+### HackRF One (`hackrf`)
+
+Напряму через libhackrf — без SoapySDR. У Windows бібліотеку треба один раз завантажити:
+```bash
+python scripts/fetch_hackrf.py          # кладе hackrf-0.dll + libusb + libwinpthread у third_party/hackrf
+python -m fpv_emulator.cli probe --device hackrf
+python -m fpv_emulator.cli tx --backend hackrf --channel R1 --gain -20
+python -m fpv_emulator.cli tx --backend hackrf --freq-mhz 4500 --gain 0 --amp
+```
+(Linux: `apt install libhackrf0`. `HACKRF_LIB` задає бібліотеку явно.) Драйвер HackRF —
+WinUSB; зі свіжою прошивкою HackRF Windows ставить його сама.
+
+У GUI: backend `hackrf`, за потреби серійник плати (порожньо = перша знайдена) і
+перемикач **RF-підсилювач +14 дБ**; «Проба HackRF» читає плату, прошивку й серійник.
+Відмінності від Pluto:
+- частота дискретизації **2–20 MSPS** (типові 20 підходять), IQ 8 біт;
+- потужність: один дБ повзунка — це один дБ в ефірі від максимуму — 0..−47 дБ (TXVGA),
+  з підсилювачем 0..−61 дБ; він вмикається лише коли самого TXVGA не вистачає.
+  Ніколи не вмикайте підсилювач без антени чи навантаження;
+- кадр крутить хост; зупиняйте кнопкою **Стоп** (або Ctrl+C). Процес, убитий посеред
+  передачі, може лишити плату в режимі TX — тоді вона відповідає «не знайдено», доки не
+  натиснути **RESET**.
 
 ---
 

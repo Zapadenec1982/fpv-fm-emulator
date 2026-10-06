@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.5.3](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.3.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.6.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.0.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -72,7 +72,8 @@ fpv_emulator/
   video.py        composite video (PAL50/NTSC60), luma + color patterns, chroma
   fm.py           FM modulation baseband → IQ, conversion to int16
   signal_gen.py   video+FM → frame (cyclic) IQ; multi-drone
-  backends.py     IQ sinks: Pluto (pyadi-iio) | soapy (HackRF/Lime/…) | file | null
+  backends.py     IQ sinks: Pluto (pyadi-iio) | hackrf | soapy (HackRF/Lime/…) | file | null
+  hackrf.py       HackRF One through libhackrf (ctypes) + its probe
   scenarios.py    scenario engine (static/sweep+pause/power_ramp/multi_drone), live power
   config.py       loading/validation of YAML scenarios
   probe.py        detection of the Pluto chip and its tuning limits
@@ -117,7 +118,7 @@ tests/            offline core tests (pytest, 209 of them)
 
 It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 `pluto`). Everything is controlled with the mouse:
-- **Output:** backend (`pluto` / `soapy` for HackRF and others), URI/device,
+- **Output:** backend (`pluto` / `hackrf` / `soapy` for other SDRs), URI/device,
   **Firmware** profile (see below), the "Probe Pluto" and "List SDRs" buttons.
 - **Frequency:** band/channel or a manually entered carrier.
 - **Signal:** standard, pattern (preview in color), sample rate, deviation.
@@ -296,6 +297,7 @@ with the `--backend` flag (CLI) or in the GUI.
 | Backend | Devices | Notes |
 |---------|----------|----------|
 | `pluto` | ADALM-Pluto / Pluto+ | native (pyadi-iio/libiio), cyclic buffer inside the device |
+| `hackrf` | **HackRF One** | native (libhackrf, no SoapySDR); the host loops the frame |
 | `soapy` | **HackRF, LimeSDR, BladeRF, USRP**, Pluto and others | via SoapySDR; the host streams the frame continuously |
 | `file` | any (offline) | IQ written to `.iq`/`.npy` |
 | `null` | — | dry run without going on air |
@@ -314,6 +316,29 @@ mapped automatically onto the device's real gain range.
 host loops the frame). Cheap RTL-SDR dongles **cannot transmit** (receive only).
 Diagnostics through RX (probe, RX self-reception) are specific to Pluto.
 For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
+
+### HackRF One (`hackrf`)
+
+Straight through libhackrf — no SoapySDR. On Windows, fetch the library once:
+```bash
+python scripts/fetch_hackrf.py          # puts hackrf-0.dll + libusb + libwinpthread into third_party/hackrf
+python -m fpv_emulator.cli probe --device hackrf
+python -m fpv_emulator.cli tx --backend hackrf --channel R1 --gain -20
+python -m fpv_emulator.cli tx --backend hackrf --freq-mhz 4500 --gain 0 --amp
+```
+(Linux: `apt install libhackrf0`. `HACKRF_LIB` names a library explicitly.) The
+HackRF driver is WinUSB; recent HackRF firmware gets it from Windows by itself.
+
+In the GUI: backend `hackrf`, optionally the board's serial (empty = the first one)
+and the **RF amplifier +14 dB** switch; «Probe HackRF» reads the board, firmware and
+serial. Differences from the Pluto:
+- sample rate **2–20 MSPS** (the default 20 fits), 8-bit IQ;
+- power: one slider dB is one dB on air from the maximum — 0..−47 dB (TXVGA), with
+  the amplifier 0..−61 dB; it is switched on only when TXVGA alone is not enough.
+  Never run the amplifier without an antenna or a load;
+- the frame is looped by the host; stop with **Stop** (or Ctrl+C). A process that is
+  killed mid-transmission can leave the board stuck in TX, and it then reports
+  "not found" until **RESET** is pressed.
 
 ---
 

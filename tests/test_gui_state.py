@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtCore = pytest.importorskip("PySide6.QtCore")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
-from fpv_emulator.i18n import get_language, set_language
+from fpv_emulator.i18n import get_language, set_language, t
 from gui.app import MainWindow, _as_bool
 
 
@@ -261,3 +261,113 @@ def test_an_ordinary_warning_is_never_filed_away(qt_app, settings):
     text = "Aliasing risk: the pattern folds past Nyquist"
     assert _warn_through_the_hook(w, text, UserWarning) == 1
     assert _warn_through_the_hook(w, text, UserWarning) == 2
+
+
+# ------------------------------- hackrf ------------------------------------
+@pytest.mark.parametrize("amp", [True, False])
+def test_the_hackrf_serial_and_amplifier_survive_a_restart(qt_app, settings, amp):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w.ed_serial.setText("b65c67dc327cba5f")
+    w.chk_amp.setChecked(amp)
+    w._save_state()
+
+    again = _window(settings)
+    assert again.cb_backend.currentText() == "hackrf"
+    assert again.ed_serial.text() == "b65c67dc327cba5f"
+    assert again.chk_amp.isChecked() is amp
+
+
+def test_choosing_hackrf_unlocks_its_fields_and_its_range(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("pluto")
+    assert not w.ed_serial.isEnabled() and not w.chk_amp.isEnabled()
+
+    w.cb_backend.setCurrentText("hackrf")
+    assert w.ed_serial.isEnabled() and w.chk_amp.isEnabled()
+    assert w.cb_hw.currentText() == "hackrf"
+    assert w.btn_probe.text() == t("Probe HackRF")
+    assert not w.cb_fw.isEnabled(), "the firmware profile is Pluto-only"
+
+    # leaving hackrf must not keep a HackRF range for a Pluto
+    w.cb_backend.setCurrentText("pluto")
+    assert w.cb_hw.currentText() == "hacked"
+    assert w.btn_probe.text() == t("Probe Pluto")
+
+
+def test_the_sink_gets_the_serial_and_the_amplifier(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w.ed_serial.setText("  abc  ")
+    w.chk_amp.setChecked(True)
+    sink = w._make_sink(20e6)
+    assert type(sink).__name__ == "HackRFSink"
+    assert sink.cfg.serial == "abc" and sink.cfg.amp is True
+
+def _hw_item_enabled(w, text):
+    i = w.cb_hw.findText(text)
+    return w.cb_hw.model().item(i).isEnabled()
+
+
+def test_a_hackrf_gets_none_of_the_pluto_settings(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    assert not w.ed_uri.isEnabled(), "URI is Pluto-only"
+    assert not w.cb_fw.isEnabled(), "firmware profile is Pluto-only"
+    assert not w.cb_hw.isEnabled() and w.cb_hw.currentText() == "hackrf"
+    assert not _hw_item_enabled(w, "hacked") and not _hw_item_enabled(w, "stock")
+    assert w.sp_fs.maximum() == pytest.approx(20.0)
+    assert w.sl_gain.minimum() == -47
+    assert not w.ed_device.isEnabled() and not w.btn_devices.isEnabled()
+
+
+def test_a_pluto_gets_none_of_the_hackrf_settings(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w.cb_backend.setCurrentText("pluto")
+    assert w.ed_uri.isEnabled() and w.cb_fw.isEnabled()
+    assert not w.ed_serial.isEnabled() and not w.chk_amp.isEnabled()
+    assert w.cb_hw.isEnabled() and w.cb_hw.currentText() in ("hacked", "stock")
+    assert not _hw_item_enabled(w, "hackrf")
+    assert w.sp_fs.maximum() == pytest.approx(61.44)
+    assert w.sl_gain.minimum() == -89
+
+
+def test_the_amplifier_extends_the_hackrf_power_scale(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w.chk_amp.setChecked(True)
+    assert w.sl_gain.minimum() == -61
+    w.sl_gain.setValue(-55)
+    w.chk_amp.setChecked(False)
+    assert w.sl_gain.minimum() == -47 and w.sl_gain.value() == -47
+
+
+def test_a_pluto_rate_is_brought_into_the_hackrf_range(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("pluto")
+    w.sp_fs.setValue(30.72)
+    w.cb_backend.setCurrentText("hackrf")
+    assert w.sp_fs.value() == pytest.approx(20.0)
+
+
+def test_a_restored_hackrf_comes_back_with_its_own_limits(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w._save_state()
+    again = _window(settings)
+    assert again.cb_hw.currentText() == "hackrf" and not again.ed_uri.isEnabled()
+    assert again.sp_fs.maximum() == pytest.approx(20.0)
+
+
+def test_nothing_backend_specific_can_be_changed_on_air(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    w.thread = object()                      # what _on_start sets; no real run
+    try:
+        w._set_running(True)
+        assert not w.ed_serial.isEnabled() and not w.chk_amp.isEnabled()
+    finally:
+        w.thread = None
+        w._set_running(False)
+    assert w.ed_serial.isEnabled()

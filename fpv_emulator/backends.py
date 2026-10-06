@@ -1,4 +1,4 @@
-"""TX backends: Pluto (pyadi-iio), file, and null.
+"""TX backends: Pluto (pyadi-iio), HackRF (libhackrf), SoapySDR, file, and null.
 
 An abstraction over the IQ sink. The core (video/fm/signal_gen) does not depend
 on hardware; the hardware import (``adi``) is deferred, so offline development
@@ -30,6 +30,8 @@ class TxConfig:
     rf_bw_hz: Optional[float] = None
     uri: str = "ip:192.168.2.1"     # typical Pluto URI over USB-Ethernet
     device: str = "driver=hackrf"   # SoapySDR device args (e.g. driver=hackrf|lime|uhd)
+    serial: str = ""                # HackRF serial (backend=hackrf); "" = the first one
+    amp: bool = False               # HackRF: allow the +14 dB RF amplifier
     # Which ways of setting the sample rate we may try — see firmware.py.
     # Only PlutoSink reads it; for the soapy/file/null sinks it means nothing.
     firmware: str = firmware_mod.AUTO
@@ -863,6 +865,133 @@ class SoapySink(BaseSink):
 
 
 # ---------------------------------------------------------------------------
+#  HackRF backend — libhackrf directly (ctypes), no SoapySDR
+# ---------------------------------------------------------------------------
+class HackRFSink(BaseSink):
+    """Transmit through a HackRF One.
+
+    Differs from the Pluto in three ways that matter here: the IQ is 8-bit, the
+    sample rate is 2–20 MSPS, and the frame is looped on the host (libhackrf's
+    transfer callback) rather than in a cyclic buffer on the device. Power keeps
+    the slider's meaning — 0 dB is the maximum — see hackrf.split_gain().
+    """
+
+    def __init__(self, cfg: TxConfig):
+        super().__init__(cfg)
+        from . import hackrf as hk
+
+        # Refused, not clamped, for the reason PlutoSink gives: the buffer is
+        # generated for the requested rate and the line timing scales with it.
+        if not hk.FS_MIN_HZ <= cfg.fs <= hk.FS_MAX_HZ:
+            raise RuntimeError(t(
+                "HackRF does not accept {wanted} MSPS — it allows {min}–{max}. Set "
+                "the sample rate within that range (in the GUI: 'Sample rate').",
+                wanted=f"{cfg.fs/1e6:.2f}", min=f"{hk.FS_MIN_HZ/1e6:.0f}",
+                max=f"{hk.FS_MAX_HZ/1e6:.0f}"))
+        self._dev = None
+        self._feeder = None
+        self._filter_hz: Optional[float] = None
+
+    def info(self) -> dict:
+        from .hackrf import split_gain
+
+        d = super().info()
+        d["txvga_db"], d["amp_on"] = split_gain(self.cfg.gain_db, self.cfg.amp)
+        d["bb_filter_hz"] = self._filter_hz
+        return d
+
+    def _ensure_open(self) -> None:
+        if self._dev is not None:
+            return
+        from . import hackrf as hk
+
+        dev = hk.HackRFDevice(self.cfg.serial or None)
+        try:
+            want = float(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
+            self._filter_hz = dev.set_sample_rate(self.cfg.fs, want)
+            if want > hk.BB_FILTER_MAX_HZ + 1e3:
+                warnings.warn(
+                    t("This signal needs a {want} MHz transmit filter; the HackRF "
+                      "allows up to {max} MHz, so {used} MHz was applied. The "
+                      "outermost sidebands are attenuated — the video and the line "
+                      "rate are unchanged.",
+                      want=f"{want/1e6:.2f}", max=f"{hk.BB_FILTER_MAX_HZ/1e6:.0f}",
+                      used=f"{self._filter_hz/1e6:.2f}"),
+                    DeviceDetail, stacklevel=2)
+            if self.cfg.freq_hz:
+                dev.set_freq(self.cfg.freq_hz)
+            dev.set_gain(*hk.split_gain(self.cfg.gain_db, self.cfg.amp))
+        except Exception:
+            # a half-configured handle would make the next start() skip this
+            dev.close()
+            raise
+        self._dev = dev
+
+    def start(self, iq_int16: np.ndarray) -> None:
+        from .hackrf import CyclicFeeder, int16_iq_to_int8_interleaved
+
+        self._ensure_open()
+        data = int16_iq_to_int8_interleaved(iq_int16)
+        if self._dev.streaming:
+            self._feeder.set_data(data)          # already on air: swap the frame
+        else:
+            self._feeder = CyclicFeeder(data)
+            self._dev.start_tx(self._feeder)
+        self._running = True
+
+    def reload(self, iq_int16: np.ndarray) -> None:
+        self.start(iq_int16)
+
+    def poll_error(self) -> Optional[BaseException]:
+        # libhackrf stops the stream by itself on a USB error or an unplug; a
+        # sink that still says "running" then would be the silent failure the
+        # error channel exists for.
+        if self._running and self._dev is not None and self._dev.streaming:
+            try:
+                alive = self._dev.is_streaming()
+            except Exception:  # pragma: no cover - needs a device
+                alive = True
+            if not alive:
+                self._running = False
+                self._record_error(RuntimeError(t(
+                    "HackRF stopped streaming (USB error or unplugged) — "
+                    "nothing is on air.")))
+        return super().poll_error()
+
+    def set_freq(self, freq_hz: float) -> None:
+        self.cfg.freq_hz = freq_hz
+        if self._dev is not None:
+            self._dev.set_freq(freq_hz)
+
+    def set_gain(self, gain_db: float) -> None:
+        from .hackrf import split_gain
+
+        self.cfg.gain_db = gain_db
+        if self._dev is not None:
+            self._dev.set_gain(*split_gain(gain_db, self.cfg.amp))
+
+    def stop(self) -> None:
+        # called from finally blocks: record, never raise
+        if self._dev is not None:
+            try:
+                self._dev.stop_tx()
+            except Exception as exc:  # pragma: no cover - needs a device
+                self._record_error(RuntimeError(
+                    t("Failed to stop the HackRF transmission ({err}) — "
+                      "the device may still be radiating", err=str(exc))))
+        self._running = False
+
+    def close(self) -> None:
+        self.stop()
+        if self._dev is not None:
+            try:
+                self._dev.close()
+            except Exception:  # pragma: no cover - needs a device
+                pass
+            self._dev = None
+
+
+# ---------------------------------------------------------------------------
 #  File backend — write IQ for inspection / GNU Radio replay
 # ---------------------------------------------------------------------------
 class FileSink(BaseSink):
@@ -941,6 +1070,8 @@ def make_sink(kind: str, cfg: TxConfig, file_path: Optional[str] = None) -> Base
     kind = kind.lower()
     if kind == "pluto":
         return PlutoSink(cfg)
+    if kind == "hackrf":
+        return HackRFSink(cfg)
     if kind == "soapy":
         return SoapySink(cfg)
     if kind == "file":
@@ -948,5 +1079,5 @@ def make_sink(kind: str, cfg: TxConfig, file_path: Optional[str] = None) -> Base
     if kind == "null":
         return NullSink(cfg)
     raise ValueError(
-        t("Unknown backend '{kind}' (pluto|soapy|file|null)", kind=kind)
+        t("Unknown backend '{kind}' (pluto|hackrf|soapy|file|null)", kind=kind)
     )
