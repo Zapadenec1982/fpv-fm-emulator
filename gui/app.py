@@ -214,7 +214,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # The version goes in the title because that is where it survives a
         # screenshot, which is how a problem usually arrives from a colleague.
         self.setWindowTitle(
-            t("FPV FM emulator for Pluto+ · test signal for FPV detectors")
+            t("FPV FM emulator for Pluto+ and HackRF · test signal for FPV detectors")
             + f"  ·  v{__version__}")
 
         central = QtWidgets.QWidget()

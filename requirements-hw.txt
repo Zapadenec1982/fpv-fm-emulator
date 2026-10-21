@@ -1,4 +1,12 @@
-# Hardware dependencies — only needed for real transmission through Pluto+.
+# Hardware dependencies — only needed for real transmission.
+#
+# --- HackRF One (backend=hackrf): NOTHING to pip-install. ---
+# It talks to the native libhackrf directly. Windows: run
+#   .venv\Scripts\python.exe scripts\fetch_hackrf.py
+# once (libhackrf + libusb + libwinpthread into third_party\hackrf, checksummed).
+# Linux: apt install libhackrf0.   macOS: brew install hackrf.
+#
+# --- ADALM-Pluto / Pluto+ (backend=pluto): ---
 # libiio (the native library) must be installed separately:
 #   Windows:  the libiio installer (Analog Devices)
 #   Linux:    apt install libiio0 libiio-utils   (or build from source)
@@ -7,7 +15,8 @@
 pyadi-iio>=0.0.16
 pylibiio>=0.24
 
-# --- SoapySDR (backend=soapy): HackRF, LimeSDR, BladeRF, USRP, etc. ---
+# --- SoapySDR (backend=soapy): LimeSDR, BladeRF, USRP, etc. ---
+# (A HackRF does not need it: backend=hackrf, above.)
 # SoapySDR is NOT installable via pip — install it system-wide together with the
 # device driver:
 #   Windows: PothosSDR (https://github.com/pothosware/PothosSDR) — ships SoapySDR,

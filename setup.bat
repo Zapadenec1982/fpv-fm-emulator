@@ -93,6 +93,7 @@ echo ============================================================
 echo   Done. Start the GUI by double-clicking run_gui.bat
 echo ============================================================
 echo.
-echo   (SoapySDR for HackRF/Lime - separately, see requirements-hw.txt)
+echo   HackRF One: run once  .venv\Scripts\python.exe scripts\fetch_hackrf.py
+echo   (SoapySDR for Lime/BladeRF/USRP - separately, see requirements-hw.txt)
 echo.
 pause

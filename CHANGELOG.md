@@ -15,6 +15,21 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.6.3 — 2026-10-21
+
+### Documentation
+- **The READMEs describe the HackRF everywhere it applies**, not only in its own
+  section: the title and the signal chain name it, Windows setup says to run
+  `scripts\fetch_hackrf.py` once, the GUI tour lists its serial and amplifier and
+  that only the selected backend's settings can be edited, the DSP section says the
+  HackRF loops the frame on the host, the CLI examples include it, and `soapy` no
+  longer reads as the way to a HackRF. The test count is 252, and what the HackRF
+  tests cover is listed.
+- **A new screenshot**, taken on the bench while a HackRF transmitted on 7250 MHz.
+- `requirements-hw.txt` and the end of `setup.bat` now say a HackRF needs nothing
+  from pip and no SoapySDR — they still sent it to PothosSDR.
+- The window title says "Pluto+ and HackRF".
+
 ## 0.6.2 — 2026-10-21
 
 ### Changed

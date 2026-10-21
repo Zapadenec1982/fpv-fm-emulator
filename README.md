@@ -1,9 +1,9 @@
-# FPV FM Emulator for Pluto+
+# FPV FM Emulator for Pluto+ and HackRF
 
 **English** | [Українська](README.uk.md)
 
 A generator of test **analog FPV video with FM modulation** built on the
-**ADALM-Pluto+** SDR. It builds realistic composite video (color test patterns),
+**ADALM-Pluto+** and **HackRF One** SDRs. It builds realistic composite video (color test patterns),
 frequency-modulates a carrier with it and transmits over the air — so you can test
 **analog FPV detectors** across different bands, channels and power levels, either
 with scenarios (band sweep, power ramp, several "drones" at once) or manually.
@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.6.2](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.2.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.6.3](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.3.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -51,7 +51,7 @@ the camera. An FPV detector receives that FM video and detects the presence of a
 The emulator reproduces exactly that signal:
 
 ```
-color test pattern → composite video (CVBS, PAL50/NTSC60) → FM → IQ → Pluto TX
+color test pattern → composite video (CVBS, PAL50/NTSC60) → FM → IQ → Pluto / HackRF TX
 ```
 
 **Important (verified on a real detector):** the detector looks not only at power
@@ -72,7 +72,7 @@ fpv_emulator/
   video.py        composite video (PAL50/NTSC60), luma + color patterns, chroma
   fm.py           FM modulation baseband → IQ, conversion to int16
   signal_gen.py   video+FM → frame (cyclic) IQ; multi-drone
-  backends.py     IQ sinks: Pluto (pyadi-iio) | hackrf | soapy (HackRF/Lime/…) | file | null
+  backends.py     IQ sinks: Pluto (pyadi-iio) | HackRF (libhackrf) | soapy (Lime/BladeRF/…) | file | null
   hackrf.py       HackRF One through libhackrf (ctypes) + its probe
   scenarios.py    scenario engine (static/sweep+pause/power_ramp/multi_drone), live power
   config.py       loading/validation of YAML scenarios
@@ -87,8 +87,9 @@ config/
   bands.yaml      channel frequencies (editable)
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
+scripts/fetch_hackrf.py  fetches libhackrf for Windows into third_party/hackrf
 CHANGELOG.md      what changed in each version
-tests/            offline core tests (pytest, 209 of them)
+tests/            offline core tests (pytest, 252 of them)
 ```
 
 ---
@@ -111,6 +112,14 @@ tests/            offline core tests (pytest, 209 of them)
 > for 0.x. «Probe Pluto» says which of the two is missing. If `ip:192.168.2.1` does
 > not answer while the board is plugged in, the URI `usb:` reaches it over USB.
 
+> **To transmit through a HackRF One, run `scripts\fetch_hackrf.py` once** (from the
+> project folder: `.venv\Scripts\python.exe scripts\fetch_hackrf.py`). It downloads
+> libhackrf and the two DLLs it needs from conda-forge, checks them against pinned
+> checksums and puts them into `third_party\hackrf` — nothing is installed system-wide.
+> The HackRF's USB driver (WinUSB) comes from Windows itself with recent HackRF
+> firmware. «Probe HackRF» says whether the board answers. See
+> [HackRF One](#hackrf-one-hackrf) below.
+
 > Tip: right-click `run_gui.bat` → create a desktop shortcut / pin it to the taskbar —
 > and startup becomes a single click.
 
@@ -118,26 +127,32 @@ tests/            offline core tests (pytest, 209 of them)
 
 It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 `pluto`). Everything is controlled with the mouse:
-- **Output:** backend (`pluto` / `hackrf` / `soapy` for other SDRs), URI/device,
-  **Firmware** profile (see below), the "Probe Pluto" and "List SDRs" buttons.
+- **Output:** backend (`pluto` / `hackrf` / `soapy` for other SDRs), the Pluto URI
+  and **Firmware** profile (see below), the HackRF serial and **RF amplifier** switch,
+  the SoapySDR device, and the "Probe Pluto" / "Probe HackRF" and "List SDRs" buttons.
+  **Only the selected backend's settings can be edited**: with `hackrf` the Pluto
+  URI, firmware profile and AD9363/AD9361 range are locked, the sample rate stops at
+  20 MSPS, the power slider at −47 dB (−61 with the amplifier) and the carrier goes
+  on to 7250 MHz; with `pluto` the HackRF fields are locked and the usual 61.44 MSPS,
+  −89 dB and 6000 MHz apply.
 - **Frequency:** band/channel or a manually entered carrier.
 - **Signal:** standard, pattern (preview in color), sample rate, deviation.
-- **Power:** slider, **changes at runtime** while transmitting.
+- **Power:** slider, 0 dB = maximum, **changes at runtime** while transmitting.
 - **Mode:** manual carrier or a ready-made scenario; Start/Stop; event log with a
   **Verbose** switch — off, a note about how the board had to be configured appears
   once per session instead of on every Start.
 - **Language:** a selector in the **Output** panel switches the interface between
   English and Ukrainian.
 
-**The window reopens where you left it.** Every setting — backend, URI, band and
-channel, carrier, standard, pattern, sample rate, deviation, power, firmware profile,
-mode and language — is saved when you close the window and when you press Start, and
+**The window reopens where you left it.** Every setting — backend, URI, HackRF serial
+and amplifier, band and channel, carrier, standard, pattern, sample rate, deviation,
+power, firmware profile, mode and language — is saved when you close the window and when you press Start, and
 restored on the next launch. The event log is not kept: yesterday's log in a fresh
 window reads as if it belonged to this session. A saved value that no longer exists
 (a renamed pattern, a band removed from `bands.yaml`) is quietly dropped and the
 widget keeps its default.
 
-To transmit: choose backend `pluto` (or `soapy`), a frequency → **Start**.
+To transmit: choose backend `pluto` or `hackrf` (or `soapy`), a frequency → **Start**.
 
 ---
 
@@ -149,6 +164,8 @@ The GUI covers everyday work; the CLI is handy for scripts. Run it through `.ven
 .venv\Scripts\python.exe -m fpv_emulator.cli probe
 .venv\Scripts\python.exe -m fpv_emulator.cli tx --backend pluto --scenario sweep_ranges
 .venv\Scripts\python.exe -m fpv_emulator.cli tx --backend pluto --freq-mhz 1200 --pattern color_bars --gain 0
+.venv\Scripts\python.exe -m fpv_emulator.cli probe --device hackrf
+.venv\Scripts\python.exe -m fpv_emulator.cli tx --backend hackrf --channel R1 --gain 0 --amp
 .venv\Scripts\python.exe -m fpv_emulator.cli gen --pattern color_bars --sample-rate 20e6 --out frame.iq
 .venv\Scripts\python.exe -m fpv_emulator.cli list-bands   # also list-patterns | list-scenarios | list-devices
 ```
@@ -164,7 +181,8 @@ python -m venv .venv
 pip install -r requirements.txt -r requirements-hw.txt
 ```
 The native **libiio** must be present in the system (Windows: libiio 0.25 from Analog
-Devices, see above; Linux: `apt install libiio0 libiio-utils`).
+Devices, see above; Linux: `apt install libiio0 libiio-utils`). For a HackRF, run
+`python scripts/fetch_hackrf.py` (Windows) or `apt install libhackrf0` (Linux).
 
 ---
 
@@ -225,11 +243,14 @@ sweep:
    added (U/V; for PAL — the V phase is switched line by line).
 2. **FM** (`fm.py`): `iq = exp(j·2π·∫ dev·v dt)`. Centering (subtracting the mean)
    ensures phase continuity at the seam of the cyclic buffer.
-3. **Cyclic buffer**: one field is uploaded as `tx_cyclic_buffer` and repeated inside
-   the device. Frequency/power changes happen on the fly; a pattern change means a
-   re-upload.
-4. **Live power**: the GUI slider stores the value and the worker thread applies
-   `tx_hardwaregain` (libiio is touched from a single thread only).
+3. **Cyclic buffer**: on a Pluto one field is uploaded as `tx_cyclic_buffer` and
+   repeated inside the device. A HackRF has no such buffer: libhackrf calls back for
+   every USB transfer and the host copies the next stretch of the field into it,
+   wrapping at the end (8-bit IQ). Either way, frequency/power changes happen on the
+   fly; a pattern change means a re-upload.
+4. **Live power**: the GUI slider stores the value and the worker thread applies it —
+   `tx_hardwaregain` on a Pluto, TXVGA (+ the RF amplifier) on a HackRF; the device
+   is touched from a single thread only.
 
 **Nyquist:** the peak excursion `±deviation/2` (+ multi-drone offsets) must be < `fs/2`,
 otherwise the signal folds back (a warning is issued).
@@ -245,6 +266,9 @@ otherwise the signal folds back (a warning is issued).
 
 At **5.8 GHz the Pluto output is weaker** (the board is designed for ~up to 3.8 GHz) —
 a wide signal there may be marginal. On the lower bands (1–3 GHz) the output is strong.
+
+A **HackRF One** is rated 1 MHz – 6 GHz and tunes on to 7250 MHz unofficially; the GUI's
+«HW range» is then fixed to `hackrf`. See [HackRF One](#hackrf-one-hackrf).
 
 ---
 
@@ -298,7 +322,7 @@ with the `--backend` flag (CLI) or in the GUI.
 |---------|----------|----------|
 | `pluto` | ADALM-Pluto / Pluto+ | native (pyadi-iio/libiio), cyclic buffer inside the device |
 | `hackrf` | **HackRF One** | native (libhackrf, no SoapySDR); the host loops the frame |
-| `soapy` | **HackRF, LimeSDR, BladeRF, USRP**, Pluto and others | via SoapySDR; the host streams the frame continuously |
+| `soapy` | **LimeSDR, BladeRF, USRP**, Pluto, HackRF and others | via SoapySDR; the host streams the frame continuously. For a HackRF, `hackrf` needs no SoapySDR |
 | `file` | any (offline) | IQ written to `.iq`/`.npy` |
 | `null` | — | dry run without going on air |
 
@@ -312,8 +336,8 @@ In the GUI: backend `soapy`, in the "SDR (soapy)" field — `driver=hackrf|lime|
 the "List SDRs" button shows what is available. The power (slider −89..0, 0 = max) is
 mapped automatically onto the device's real gain range.
 
-**Caveats:** HackRF — 8 bit, half duplex, max ~20 MSPS, no hardware cyclic buffer (the
-host loops the frame). Cheap RTL-SDR dongles **cannot transmit** (receive only).
+**Caveats:** host-streamed SDRs (HackRF, Lime, …) have no hardware cyclic buffer — the
+host loops the frame. Cheap RTL-SDR dongles **cannot transmit** (receive only).
 Diagnostics through RX (probe, RX self-reception) are specific to Pluto.
 For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
 
@@ -365,7 +389,7 @@ the changelog's newest entry disagree, so they cannot drift apart.
 ```bash
 python -m pytest tests/ -q
 ```
-209 offline tests, no hardware required. They cover: band/channel lookup (including
+252 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
@@ -375,10 +399,13 @@ IIO-layout detection on boards that rename their devices, the sample-rate path u
 each firmware profile, that `--firmware` actually reaches every device open, that a
 board is never held by two contexts at once (a USB board takes one), that a missing
 libiio and a board that does not answer are reported in words rather than as ctypes
-and errno noise, that the Ukrainian catalog covers every string the code and the
-shipped YAML display, and that the saved window state survives a restart (including
-the values that a naive restore gets wrong: a "false" checkbox, a band stored by
-position, a stale pattern).
+and errno noise, the HackRF backend against a fake board (the gain
+mapping, 8-bit conversion, the seamless host-side loop, a stream that dies, the
+baseband filter never narrower than the signal, the 6000/7250 MHz limits), that the
+GUI offers only the selected backend's settings, that the Ukrainian catalog covers
+every string the code and the shipped YAML display, and that the saved window state
+survives a restart (including the values that a naive restore gets wrong: a "false"
+checkbox, a band stored by position, a stale pattern).
 
 ---
 
@@ -394,6 +421,10 @@ position, a stale pattern).
 - **A transmitter that reports success can be silent.** `tx()` returns without error
   while the DMA never starts. The sink verifies through digital loopback and retries,
   because everything measured downstream of an unnoticed silent transmitter is wrong.
+- **A HackRF's rating is not its limit — but its process must not be killed.** Rated to
+  6 GHz, it reached the detector at 6500, 7000 and 7250 MHz at full power here. Killed
+  mid-transmission, though, it stays in TX and answers "not found" until RESET: stop
+  it with Stop.
 
 ---
 

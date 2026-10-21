@@ -186,7 +186,7 @@ CATALOG_UK: Dict[str, str] = {
     "Do not retune TX during the probe": "Не перестроювати TX під час проби",
     "Drone list is empty": "Список дронів порожній",
     "Event log:": "Журнал подій:",
-    "FPV FM emulator for Pluto+ · test signal for FPV detectors": "FPV FM-емулятор для Pluto+ · тестовий сигнал для детекторів FPV",
+    "FPV FM emulator for Pluto+ and HackRF · test signal for FPV detectors": "FPV FM-емулятор для Pluto+ і HackRF · тестовий сигнал для детекторів FPV",
     "Field 'type' must be one of {types}, got '{value}'": "Поле 'type' має бути одним з {types}, отримано '{value}'",
     "File (file):": "Файл (file):",
     "Find Pluto and determine its frequency range": "Знайти Pluto й визначити діапазон",
