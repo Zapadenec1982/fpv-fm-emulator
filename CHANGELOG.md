@@ -15,6 +15,17 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.6.2 — 2026-10-21
+
+### Changed
+- **What a HackRF does above 6 GHz, measured on this bench.** At maximum power
+  (0 dB, RF amplifier on) the detector saw the carrier at 6500, 7000 and 7250 MHz —
+  the whole stretch the firmware tunes to. The GUI now says so where it matters: the
+  readout for a carrier above 6 GHz on the `hackrf` range, and the note logged when
+  `hackrf` is chosen. The READMEs record it too, with the board it was measured on.
+  The run's own warning above 6 GHz is unchanged: power up there is not guaranteed,
+  and a detector that misses it still says nothing about the detector.
+
 ## 0.6.1 — 2026-10-21
 
 ### Changed

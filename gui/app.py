@@ -910,8 +910,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(t("[WARN] backend = null — dry run, nothing goes on air."))
         elif hackrf:
             self._log(t("[info] backend = hackrf — 2–20 MSPS, power 0..-47 dB "
-                        "(0..-61 dB with the RF amplifier). «Probe HackRF» checks the "
-                        "board."))
+                        "(0..-61 dB with the RF amplifier), carrier up to 7250 MHz "
+                        "(above 6000 unofficially; on this bench the detector saw it up "
+                        "to 7250 MHz at maximum power). «Probe HackRF» checks the board."))
         elif soapy:
             self._log(t("[info] backend = soapy — set the device in the «SDR (soapy)» field "
                         "(e.g. driver=hackrf|lime|uhd). «List SDRs» shows what is available."))

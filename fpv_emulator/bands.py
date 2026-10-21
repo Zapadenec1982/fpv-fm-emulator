@@ -185,8 +185,10 @@ class BandTable:
         if rng.tune_max_hz and rng.max_hz < freq_hz <= rng.tune_max_hz:
             return False, t(
                 "Frequency {freq} MHz is above the {chip} rating ({max} MHz). It "
-                "tunes up to {tune} MHz unofficially, with little or no output "
-                "power — the detector may not see it.",
+                "tunes up to {tune} MHz unofficially, with far less output power. "
+                "On this bench the detector still saw it at 6500, 7000 and 7250 MHz "
+                "with the power at maximum (0 dB, RF amplifier on) — keep it there "
+                "up here.",
                 freq=f"{freq_hz/1e6:.1f}", chip=rng.chip,
                 max=f"{rng.max_hz/1e6:.0f}", tune=f"{rng.tune_max_hz/1e6:.0f}")
         msg = t(

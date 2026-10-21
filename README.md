@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.6.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.1.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.6.2](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.6.2.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -335,7 +335,11 @@ serial. Differences from the Pluto:
 - sample rate **2–20 MSPS** (the default 20 fits), 8-bit IQ;
 - carrier: rated 1 MHz – 6 GHz; the GUI and CLI go on to **7250 MHz**, which the
   firmware tunes to unofficially. Great Scott Gadgets call the One "quite lossy above
-  6.1 or 6.2 GHz" — expect little or no output power there, and the run says so;
+  6.1 or 6.2 GHz" — expect far less output power there, and the run says so.
+  **On this bench** (HackRF One r1–r8, power 0 dB with the RF amplifier) the detector
+  still saw the carrier at 6500, 7000 and 7250 MHz — 7250 being where the firmware
+  stops tuning. Keep the power at maximum above 6 GHz; another board or antenna may
+  do worse;
 - power: one slider dB is one dB on air from the maximum — 0..−47 dB (TXVGA), with
   the amplifier 0..−61 dB; it is switched on only when TXVGA alone is not enough.
   Never run the amplifier without an antenna or a load;
