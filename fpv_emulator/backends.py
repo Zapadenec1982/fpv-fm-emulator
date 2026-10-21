@@ -891,6 +891,7 @@ class HackRFSink(BaseSink):
         self._dev = None
         self._feeder = None
         self._filter_hz: Optional[float] = None
+        self._warned_freqs: set = set()      # above-6-GHz carriers already warned about
 
     def info(self) -> dict:
         from .hackrf import split_gain
@@ -919,7 +920,7 @@ class HackRFSink(BaseSink):
                       used=f"{self._filter_hz/1e6:.2f}"),
                     DeviceDetail, stacklevel=2)
             if self.cfg.freq_hz:
-                dev.set_freq(self.cfg.freq_hz)
+                self._tune(dev, self.cfg.freq_hz)
             dev.set_gain(*hk.split_gain(self.cfg.gain_db, self.cfg.amp))
         except Exception:
             # a half-configured handle would make the next start() skip this
@@ -958,10 +959,27 @@ class HackRFSink(BaseSink):
                     "nothing is on air.")))
         return super().poll_error()
 
+    def _tune(self, dev, freq_hz: float) -> None:
+        """Retune, refusing what cannot be tuned and saying what is unofficial.
+
+        Above the rated 6 GHz the carrier is warned about once per frequency
+        and run — a sweep over several channels up there names each of them,
+        not each lap. A plain UserWarning: this is about what is on air, so the
+        GUI never files it away as a device detail.
+        """
+        from . import hackrf as hk
+
+        hk.check_tunable(freq_hz)
+        dev.set_freq(freq_hz)
+        note = hk.above_rating_warning(freq_hz)
+        if note and freq_hz not in self._warned_freqs:
+            self._warned_freqs.add(freq_hz)
+            warnings.warn(note, UserWarning, stacklevel=3)
+
     def set_freq(self, freq_hz: float) -> None:
         self.cfg.freq_hz = freq_hz
         if self._dev is not None:
-            self._dev.set_freq(freq_hz)
+            self._tune(self._dev, freq_hz)
 
     def set_gain(self, gain_db: float) -> None:
         from .hackrf import split_gain

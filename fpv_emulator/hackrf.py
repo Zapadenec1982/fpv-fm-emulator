@@ -29,7 +29,13 @@ HACKRF_TRUE = 1
 
 # HackRF One hardware limits
 FREQ_MIN_HZ = 1e6
-FREQ_MAX_HZ = 6e9
+FREQ_MAX_HZ = 6e9        # the rated range ends here
+# The firmware tunes on to 7250 MHz (MAX_HP_FREQ in firmware/common/tuning.c).
+# Unofficial: Great Scott Gadgets call the One "quite lossy above 6.1 or 6.2 GHz",
+# and a maintainer says to expect "little or no output power" up there
+# (greatscottgadgets/hackrf#1435). Older firmware refuses a frequency above this;
+# current firmware clamps it to 7250 without a word — so it is checked here.
+FREQ_TUNE_MAX_HZ = 7.25e9
 FS_MIN_HZ = 2e6
 FS_MAX_HZ = 20e6
 TXVGA_MAX_DB = 47        # TX IF amplifier, 0..47 dB in 1 dB steps
@@ -168,6 +174,47 @@ def split_gain(gain_db: float, amp: bool) -> Tuple[int, bool]:
     return min(total, TXVGA_MAX_DB), False
 
 
+#: the MAX2837's baseband filter settings, Hz (max2837_ft[] in libhackrf)
+BB_FILTERS_HZ = (1.75e6, 2.5e6, 3.5e6, 5e6, 5.5e6, 6e6, 7e6, 8e6, 9e6, 10e6,
+                 12e6, 14e6, 15e6, 20e6, 24e6, 28e6)
+
+
+def baseband_filter_for(width_hz: float) -> float:
+    """The narrowest baseband filter that still passes ``width_hz`` (28 MHz at most).
+
+    Not libhackrf's hackrf_compute_baseband_filter_bw(): that rounds DOWN, so a
+    16.9 MHz signal got the 15 MHz filter and lost its outermost sidebands.
+    """
+    for bw in BB_FILTERS_HZ:
+        if bw >= width_hz:
+            return bw
+    return BB_FILTERS_HZ[-1]
+
+
+def check_tunable(freq_hz: float) -> None:
+    """Refuse a carrier the HackRF cannot be tuned to.
+
+    Above 7250 MHz current firmware would put the carrier on 7250 instead —
+    a signal somewhere other than where the run says it is.
+    """
+    if not FREQ_MIN_HZ <= freq_hz <= FREQ_TUNE_MAX_HZ:
+        raise RuntimeError(t(
+            "HackRF cannot be tuned to {freq} MHz — it tunes {min}–{max} MHz "
+            "(above {rated} MHz unofficially).",
+            freq=f"{freq_hz/1e6:.1f}", min=f"{FREQ_MIN_HZ/1e6:.0f}",
+            max=f"{FREQ_TUNE_MAX_HZ/1e6:.0f}", rated=f"{FREQ_MAX_HZ/1e6:.0f}"))
+
+
+def above_rating_warning(freq_hz: float) -> Optional[str]:
+    """The warning for a carrier above the rated 6 GHz, or None below it."""
+    if freq_hz <= FREQ_MAX_HZ:
+        return None
+    return t("HackRF at {freq} MHz is above its rated {rated} MHz: it tunes there "
+             "unofficially and puts out little or no power. A detector that does "
+             "not see this carrier says nothing about the detector.",
+             freq=f"{freq_hz/1e6:.1f}", rated=f"{FREQ_MAX_HZ/1e6:.0f}")
+
+
 def int16_iq_to_int8_interleaved(iq_int16: np.ndarray, scale_in: float = 2 ** 14) -> np.ndarray:
     """complex IQ on the int16 scale (fm.to_int16_iq peaks at ~2^14) -> int8 I,Q,I,Q…"""
     k = 127.0 / scale_in
@@ -231,13 +278,13 @@ class HackRFDevice:
     def set_sample_rate(self, fs: float, filter_hz: Optional[float] = None) -> float:
         """Set the rate and the baseband filter; return the filter actually set."""
         self._check(self.lib.hackrf_set_sample_rate(self._dev, float(fs)), "set_sample_rate")
-        want = min(float(filter_hz or 0.75 * fs), BB_FILTER_MAX_HZ)
-        bw = self.lib.hackrf_compute_baseband_filter_bw(int(want))
-        self._check(self.lib.hackrf_set_baseband_filter_bandwidth(self._dev, bw),
+        bw = baseband_filter_for(float(filter_hz or 0.75 * fs))
+        self._check(self.lib.hackrf_set_baseband_filter_bandwidth(self._dev, int(bw)),
                     "set_baseband_filter_bandwidth")
-        return float(bw)
+        return bw
 
     def set_freq(self, freq_hz: float) -> None:
+        check_tunable(freq_hz)
         self._check(self.lib.hackrf_set_freq(self._dev, int(freq_hz)), "set_freq")
 
     def set_gain(self, txvga_db: int, amp_on: bool) -> None:
@@ -314,6 +361,9 @@ class HackRFProbeResult:
         lines.append(t("  TX: {fmin}–{fmax} MHz, {smin}–{smax} MSPS, 8-bit IQ",
                        fmin=f"{FREQ_MIN_HZ/1e6:.0f}", fmax=f"{FREQ_MAX_HZ/1e6:.0f}",
                        smin=f"{FS_MIN_HZ/1e6:.0f}", smax=f"{FS_MAX_HZ/1e6:.0f}"))
+        lines.append(t("  Unofficially tunes up to {max} MHz, with little or no "
+                       "output power above the rating",
+                       max=f"{FREQ_TUNE_MAX_HZ/1e6:.0f}"))
         lines.append(t("  Direct 5.8 GHz: YES (output power there is low)"))
         return "\n".join(lines)
 

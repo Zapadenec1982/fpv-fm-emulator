@@ -223,3 +223,17 @@ def test_multi_drone_offsets_land_on_the_requested_carriers():
     assert low == pytest.approx(ref - off, abs=3 * bin_hz)
     assert high == pytest.approx(ref + off, abs=3 * bin_hz)
     assert high - low == pytest.approx(2 * off, abs=2 * bin_hz)
+
+
+# ------------------------- HackRF beyond its rating ------------------------
+def test_the_hackrf_range_says_unofficial_above_6_ghz_and_out_above_7250():
+    from fpv_emulator.bands import load_band_table
+    bt = load_band_table()
+    assert bt.check_reachable(5800e6, "hackrf") == (True, None)
+    ok, warn = bt.check_reachable(6500e6, "hackrf")
+    assert not ok and "unofficially" in warn
+    ok, warn = bt.check_reachable(7300e6, "hackrf")
+    assert not ok and "outside" in warn
+    # the Pluto presets have no unofficial band
+    ok, warn = bt.check_reachable(6500e6, "hacked")
+    assert not ok and "unofficially" not in warn

@@ -322,6 +322,11 @@ CATALOG_UK: Dict[str, str] = {
     "[info] HackRF: sample rate lowered to {max} MSPS — its maximum.": "[info] HackRF: частоту дискретизації знижено до {max} MSPS — це його максимум.",
     "Power (TXVGA + RF amplifier)": "Потужність (TXVGA + RF-підсилювач)",
     "Power (TXVGA)": "Потужність (TXVGA)",
+    "  Unofficially tunes up to {max} MHz, with little or no output power above the rating": "  Неофіційно перестроюється до {max} МГц, але вище номіналу потужності майже або зовсім немає",
+    "Frequency {freq} MHz is above the {chip} rating ({max} MHz). It tunes up to {tune} MHz unofficially, with little or no output power — the detector may not see it.": "Частота {freq} МГц вище номіналу {chip} ({max} МГц). Неофіційно він перестроюється до {tune} МГц, але потужності там майже або зовсім немає — детектор може його не побачити.",
+    "HackRF at {freq} MHz is above its rated {rated} MHz: it tunes there unofficially and puts out little or no power. A detector that does not see this carrier says nothing about the detector.": "HackRF на {freq} МГц — вище свого номіналу {rated} МГц: туди він перестроюється неофіційно і видає мало або зовсім не видає потужності. Якщо детектор не бачить цієї несучої, це нічого не каже про детектор.",
+    "HackRF cannot be tuned to {freq} MHz — it tunes {min}–{max} MHz (above {rated} MHz unofficially).": "HackRF не можна перестроїти на {freq} МГц — він перестроюється в межах {min}–{max} МГц (вище {rated} МГц — неофіційно).",
+    "[info] carrier lowered to {max} MHz — the top of this backend's range.": "[info] несучу знижено до {max} МГц — це верхня межа цього бекенду.",
 }
 
 

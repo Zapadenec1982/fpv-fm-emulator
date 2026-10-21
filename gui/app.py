@@ -324,7 +324,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_channel = QtWidgets.QComboBox()
         self.cb_channel.currentIndexChanged.connect(self._on_channel_changed)
         self.sp_freq = QtWidgets.QDoubleSpinBox()
-        self.sp_freq.setRange(50.0, 6000.0)
+        # the widest any backend allows (HackRF, unofficially); _sync_backend_controls
+        # narrows it. Narrower here would clamp a restored HackRF carrier before the
+        # restored backend could widen the box again.
+        self.sp_freq.setRange(50.0, 7250.0)
         self.sp_freq.setDecimals(1)
         self.sp_freq.setSuffix(" " + t("MHz"))
         # no setValue() here: _refresh_channels() -> _on_channel_changed() owns this
@@ -845,7 +848,8 @@ class MainWindow(QtWidgets.QMainWindow):
         Everything here is also frozen while on air: the device is opened with
         these values at Start.
         """
-        from fpv_emulator.hackrf import AMP_GAIN_DB, FS_MAX_HZ, TXVGA_MAX_DB
+        from fpv_emulator.hackrf import (AMP_GAIN_DB, FREQ_TUNE_MAX_HZ, FS_MAX_HZ,
+                                         TXVGA_MAX_DB)
 
         name = self.cb_backend.currentText()
         idle = self.thread is None
@@ -878,6 +882,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._log(t("[info] HackRF: sample rate lowered to {max} MSPS — its maximum.",
                             max=f"{fs_max:.0f}"))
             self.sp_fs.setMaximum(fs_max)
+
+        # carrier ceiling: a HackRF tunes on to 7250 MHz, unofficially — the
+        # readout says so for anything above its rated 6 GHz
+        f_max = FREQ_TUNE_MAX_HZ / 1e6 if hackrf else 6000.0
+        if self.sp_freq.maximum() != f_max:
+            if self.sp_freq.value() > f_max:
+                self._log(t("[info] carrier lowered to {max} MHz — the top of this "
+                            "backend's range.", max=f"{f_max:.0f}"))
+            self.sp_freq.setMaximum(f_max)
 
         # power scale: what the device can actually do, 0 = maximum either way
         if hackrf:

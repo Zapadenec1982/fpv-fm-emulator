@@ -42,6 +42,8 @@ class HardwareRange:
     min_hz: float
     max_hz: float
     chip: str
+    #: how far the device tunes beyond its rating, if it does (HackRF: 7.25 GHz)
+    tune_max_hz: Optional[float] = None
 
     def covers(self, freq_hz: float) -> bool:
         return self.min_hz <= freq_hz <= self.max_hz
@@ -67,6 +69,8 @@ class BandTable:
                 min_hz=float(r["min_mhz"]) * 1e6,
                 max_hz=float(r["max_mhz"]) * 1e6,
                 chip=str(r.get("chip", "")),
+                tune_max_hz=(float(r["tune_max_mhz"]) * 1e6
+                             if r.get("tune_max_mhz") else None),
             )
         table = cls(bands=dict(data.get("bands") or {}), hw_ranges=hw)
         table._index()
@@ -178,6 +182,13 @@ class BandTable:
         rng = self.hw_range(preset)
         if rng.covers(freq_hz):
             return True, None
+        if rng.tune_max_hz and rng.max_hz < freq_hz <= rng.tune_max_hz:
+            return False, t(
+                "Frequency {freq} MHz is above the {chip} rating ({max} MHz). It "
+                "tunes up to {tune} MHz unofficially, with little or no output "
+                "power — the detector may not see it.",
+                freq=f"{freq_hz/1e6:.1f}", chip=rng.chip,
+                max=f"{rng.max_hz/1e6:.0f}", tune=f"{rng.tune_max_hz/1e6:.0f}")
         msg = t(
             "Frequency {freq} MHz is outside the {chip} range ({min}–{max} MHz).",
             freq=f"{freq_hz/1e6:.1f}",

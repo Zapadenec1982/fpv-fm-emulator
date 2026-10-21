@@ -202,3 +202,48 @@ def test_the_probe_reports_a_missing_board_in_words(monkeypatch):
     res = hk.probe_hackrf()
     assert not res.connected and res.inferred_preset is None
     assert "NOT_FOUND" in res.summary()
+
+
+# ------------------------- above the rated 6 GHz ---------------------------
+def test_a_carrier_above_6_ghz_tunes_and_is_warned_about_once(fake):
+    sink = make_sink("hackrf", TxConfig(fs=20e6, freq_hz=6500e6))
+    with pytest.warns(UserWarning, match="above its rated 6000 MHz"):
+        sink.start(_frame())
+    assert ("freq", 6500e6) in fake[0].calls
+    import warnings
+    with warnings.catch_warnings(record=True) as again:
+        warnings.simplefilter("always")
+        sink.set_freq(5800e6)
+        sink.set_freq(6500e6)              # back to the same one: already said
+    assert not [w for w in again if "rated" in str(w.message)]
+
+
+def test_7250_mhz_is_the_ceiling_and_above_it_is_refused(fake):
+    sink = make_sink("hackrf", TxConfig(fs=20e6, freq_hz=5800e6))
+    sink.start(_frame())
+    with pytest.warns(UserWarning):
+        sink.set_freq(7250e6)
+    with pytest.raises(RuntimeError, match="7250"):
+        sink.set_freq(7300e6)
+    # current firmware would have clamped 7300 to 7250 silently: never sent
+    assert ("freq", 7300e6) not in fake[0].calls
+
+
+def test_nothing_is_warned_inside_the_rating(fake):
+    import warnings
+    sink = make_sink("hackrf", TxConfig(fs=20e6, freq_hz=6000e6))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        sink.start(_frame())
+    assert not [w for w in caught if "rated" in str(w.message)]
+
+
+@pytest.mark.parametrize("width, expected", [
+    (16.9e6, 20e6),     # libhackrf rounded this DOWN to 15 MHz
+    (15e6, 15e6),
+    (1e6, 1.75e6),
+    (27.6e6, 28e6),
+    (35e6, 28e6),       # widest there is
+])
+def test_the_baseband_filter_never_cuts_into_the_signal(width, expected):
+    assert hk.baseband_filter_for(width) == expected

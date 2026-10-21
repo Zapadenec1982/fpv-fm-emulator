@@ -371,3 +371,17 @@ def test_nothing_backend_specific_can_be_changed_on_air(qt_app, settings):
         w.thread = None
         w._set_running(False)
     assert w.ed_serial.isEnabled()
+
+
+
+def test_a_hackrf_carrier_reaches_7250_and_a_pluto_stops_at_6000(qt_app, settings):
+    w = _window(settings)
+    w.cb_backend.setCurrentText("hackrf")
+    assert w.sp_freq.maximum() == pytest.approx(7250.0)
+    w.sp_freq.setValue(6500.0)
+    w._save_state()
+    again = _window(settings)
+    assert again.sp_freq.value() == pytest.approx(6500.0), "restored HackRF carrier was clamped"
+    again.cb_backend.setCurrentText("pluto")
+    assert again.sp_freq.maximum() == pytest.approx(6000.0)
+    assert again.sp_freq.value() == pytest.approx(6000.0)

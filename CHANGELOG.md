@@ -15,6 +15,27 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.6.1 — 2026-10-21
+
+### Changed
+- **HackRF: carriers above 6 GHz, up to 7250 MHz.** That is where the firmware stops
+  tuning (MAX_HP_FREQ in tuning.c); 6 GHz is only the rated range. It is
+  unofficial and it is said so: Great Scott Gadgets call the One "quite lossy above
+  6.1 or 6.2 GHz", and a maintainer says to expect "little or no output power"
+  (greatscottgadgets/hackrf#1435). Each carrier above 6 GHz is warned about once per
+  run — a detector that does not see it says nothing about the detector — and the
+  readout says so for the `hackrf` HW range. The Pluto presets are unchanged.
+- **Above 7250 MHz a HackRF run is refused.** Current firmware does not refuse such a
+  frequency: it clamps it to 7250 MHz, which would put the carrier somewhere other
+  than where the run says it is. (This board's firmware refuses it outright —
+  checked: 7250 MHz tunes, 7251 does not.)
+
+### Fixed
+- **The HackRF's baseband filter was narrower than the signal.** libhackrf's
+  `hackrf_compute_baseband_filter_bw()` rounds DOWN, so the 16.9 MHz the colour
+  profile occupies got the 15 MHz filter and lost its outermost sidebands. The
+  narrowest filter that still passes the signal is now chosen (20 MHz there).
+
 ## 0.6.0 — 2026-10-06
 
 ### Added
